@@ -72,10 +72,18 @@ def transfer_data(table_name, columns, json_fields=None):
 
     columns_str = ", ".join(columns)
     placeholders = ", ".join(["%s"] * len(columns))  # %s for PostgreSQL
-
-    sqlite_cursor.execute(f"SELECT COUNT(*) FROM {table_name};")
-    total_rows = sqlite_cursor.fetchone()[0]
-    print(f"🔄 Transferring {total_rows} rows from {table_name}...")
+    
+    try:
+        sqlite_cursor.execute(f"SELECT COUNT(*) FROM {table_name};")
+        total_rows = sqlite_cursor.fetchone()[0]
+        print(f"🔄 Transferring {total_rows} rows from {table_name}...")
+    except sqlite3.OperationalError:
+        print(f"⚠️ Table {table_name} does not exist in SQLite. Skipping...")
+        sqlite_cursor.close()
+        sqlite_conn.close()
+        postgres_cursor.close()
+        postgres_conn.close()
+        return
 
     offset = 0
     while True:
