@@ -1,7 +1,7 @@
 import os
 import sqlite3
-import json
 import psycopg2
+import json
 from psycopg2.extras import execute_values
 from dotenv import load_dotenv
 
@@ -13,10 +13,10 @@ DB_USER = os.getenv("DB_USER")
 DB_HOST = os.getenv("DB_HOST")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
 DB_PORT = os.getenv("DB_PORT")
-DB_NAME = os.getenv("DB_NAME")  # PostgreSQL Database Name
+DB_NAME = os.getenv("DBG_NAME")  # PostgreSQL Database Name
 
 # SQLite database path
-SQLITE_DB_PATH = os.getenv("GITHUB_DB_PATH")
+SQLITE_DB_PATH = os.getenv("GitHub_DB_PATH")
 
 # Batch size
 BATCH_SIZE = 5000  # Adjust based on performance
@@ -48,19 +48,28 @@ def get_sqlite_connection():
         return None
 
 
-# **Function to convert JSON text to valid PostgreSQL JSONB**
-def convert_json_fields(data, json_fields):
-    """Convert JSON string fields to proper PostgreSQL JSONB."""
-    return [
-        tuple(
-            json.loads(value) if col in json_fields and value else value
-            for col, value in zip(json_fields, row)
-        ) for row in data
-    ]
+# **Function to convert JSON fields**
+def convert_json_fields(rows, columns, json_fields, boolean_fields):
+    """ Converts JSON fields and boolean fields for PostgreSQL compatibility. """
+    converted_rows = []
+    for row in rows:
+        converted_row = []
+        for col, value in zip(columns, row):
+            if col in json_fields and value:
+                try:
+                    converted_row.append(json.loads(value))  # Convert to JSON
+                except json.JSONDecodeError:
+                    converted_row.append(value)  # If invalid JSON, keep as is
+            elif col in boolean_fields:
+                converted_row.append(bool(value))  # Convert to boolean
+            else:
+                converted_row.append(value)
+        converted_rows.append(tuple(converted_row))
+    return converted_rows
 
 
 # **Function to transfer data**
-def transfer_data(table_name, columns, json_fields=None):
+def transfer_data(table_name, columns, json_fields=None, boolean_fields=None):
     """ Transfers data from SQLite to PostgreSQL in batches """
     sqlite_conn = get_sqlite_connection()
     postgres_conn = get_postgres_connection()
@@ -73,7 +82,7 @@ def transfer_data(table_name, columns, json_fields=None):
 
     columns_str = ", ".join(columns)
     placeholders = ", ".join(["%s"] * len(columns))  # %s for PostgreSQL
-    
+
     try:
         sqlite_cursor.execute(f"SELECT COUNT(*) FROM {table_name};")
         total_rows = sqlite_cursor.fetchone()[0]
@@ -94,9 +103,8 @@ def transfer_data(table_name, columns, json_fields=None):
         if not rows:
             break  # No more data
 
-        # Convert JSON fields
-        #if json_fields:
-        #    rows = convert_json_fields(rows, json_fields)
+        # Convert JSON and boolean fields
+        rows = convert_json_fields(rows, columns, json_fields or [], boolean_fields or [])
 
         insert_query = f"INSERT INTO {table_name} ({columns_str}) VALUES %s ON CONFLICT (id) DO NOTHING;"
         execute_values(postgres_cursor, insert_query, rows)
@@ -117,22 +125,25 @@ tables = {
     "comments": {
         "columns": ["id", "node_id", "url", "issue_id", "issue_url", "user", "created_at", "updated_at",
                     "author_association", "body", "reactions"],
-        "json_fields": ["reactions"]
+        "json_fields": ["reactions"],
+        "boolean_fields": []
     },
     "issues": {
         "columns": ["id", "url", "repository_id", "repository_url", "node_id", "number", "title", "owner",
                     "owner_type", "owner_id", "labels", "state", "locked", "comments", "created_at", "updated_at",
                     "closed_at", "author_association", "active_lock_reason", "body", "reactions", "state_reason"],
-        "json_fields": ["labels", "reactions"]
+        "json_fields": ["labels", "reactions"],
+        "boolean_fields": ["locked"]
     },
     "logs": {
-        "columns": ["id", "last_org_id", "last_user_id", "last_org_repository_id", "last_user_repository_id",
-                    "created_at"],
-        "json_fields": []
+        "columns": ["id", "last_org_id", "last_user_id", "last_org_repository_id", "last_user_repository_id", "created_at"],
+        "json_fields": [],
+        "boolean_fields": []
     },
     "organizations": {
         "columns": ["id", "login", "node_id", "description"],
-        "json_fields": []
+        "json_fields": [],
+        "boolean_fields": []
     },
     "repositories": {
         "columns": ["id", "node_id", "name", "full_name", "private", "owner", "owner_type", "owner_id",
@@ -142,11 +153,14 @@ tables = {
                     "archived", "disabled", "open_issues_count", "license", "allow_forking", "is_template",
                     "web_commit_signoff_required", "topics", "visibility", "forks", "open_issues", "watchers",
                     "default_branch", "permissions"],
-        "json_fields": ["license", "topics", "permissions"]
+        "json_fields": ["license", "topics", "permissions"],
+        "boolean_fields": ["private", "fork", "has_issues", "has_projects", "has_downloads", "has_wiki",
+                           "has_pages", "has_discussions", "archived", "disabled", "allow_forking", "is_template",
+                           "web_commit_signoff_required"]
     }
 }
 
 # **Run Migration**
 if __name__ == "__main__":
     for table, config in tables.items():
-        transfer_data(table, config["columns"], config["json_fields"])
+        transfer_data(table, config["columns"], config["json_fields"], config["boolean_fields"])
