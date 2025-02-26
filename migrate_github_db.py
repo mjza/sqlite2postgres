@@ -95,8 +95,8 @@ def transfer_data(table_name, columns, json_fields=None):
             break  # No more data
 
         # Convert JSON fields
-        if json_fields:
-            rows = convert_json_fields(rows, json_fields)
+        #if json_fields:
+        #    rows = convert_json_fields(rows, json_fields)
 
         insert_query = f"INSERT INTO {table_name} ({columns_str}) VALUES %s ON CONFLICT (id) DO NOTHING;"
         execute_values(postgres_cursor, insert_query, rows)
