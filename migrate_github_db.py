@@ -1,5 +1,6 @@
 import os
 import sqlite3
+import json
 import psycopg2
 from psycopg2.extras import execute_values
 from dotenv import load_dotenv
